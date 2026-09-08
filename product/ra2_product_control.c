@@ -12,10 +12,64 @@
 
 
 typedef struct { uintptr_t address; BYTE original[2]; BYTE patched[2]; Ra2ModuleId id; } Patch;
-static const Patch kPatches[] = {
-    {RA2_PRODUCT_MONEY_PATCH, {0x2B,0xC7}, {0x90,0x90}, RA2_MODULE_MONEY},
-    {RA2_PRODUCT_POWER_PATCH, {0x03,0xC8}, {0x90,0x90}, RA2_MODULE_POWER}
-};
+static const Patch kMoneyPatch = {RA2_PRODUCT_MONEY_PATCH, {0x2B,0xC7}, {0x90,0x90}, RA2_MODULE_MONEY};
+
+/* The two-byte add is shared by every house.  Replace the whole instruction
+ * plus the beginning of the following store with a guarded trampoline so AI
+ * houses keep their normal load calculation. */
+static const BYTE kPowerOriginal[5] = {0x03,0xC8,0x89,0x8E,0xD4};
+static const uintptr_t kPowerHook = RA2_PRODUCT_POWER_PATCH;
+static const uintptr_t kPowerReturn = RA2_PRODUCT_POWER_PATCH + 8;
+
+static void put32(BYTE *p, DWORD v) { memcpy(p, &v, sizeof(v)); }
+
+static BOOL read_bytes(HANDLE p, uintptr_t a, BYTE *b, SIZE_T n) {
+    SIZE_T got = 0;
+    return ReadProcessMemory(p, (void *)a, b, n, &got) && got == n;
+}
+
+static BOOL power_is_on(HANDLE p) {
+    BYTE b[5];
+    return read_bytes(p, kPowerHook, b, sizeof(b)) && b[0] == 0xE9;
+}
+
+static int power_apply(HANDLE p) {
+    BYTE current[5], patch[5] = {0xE9,0,0,0,0};
+    if (!read_bytes(p, kPowerHook, current, sizeof(current))) return 6;
+    if (!memcmp(current, kPowerOriginal, sizeof(current))) {
+        BYTE stub[64]; DWORD k = 0; SIZE_T n = 0;
+        LPVOID cave = VirtualAllocEx(p, NULL, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!cave) return 8;
+
+        /* cmp esi,[player-root]; je skip add; otherwise execute add ecx,eax.
+         * Both paths then execute the original store and return after it. */
+        stub[k++] = 0x3B; stub[k++] = 0x35; put32(stub + k, RA2_PRODUCT_PLAYER_ROOT); k += 4;
+        stub[k++] = 0x74; stub[k++] = 0x02;
+        stub[k++] = 0x03; stub[k++] = 0xC8;
+        stub[k++] = 0x89; stub[k++] = 0x8E; put32(stub + k, 0x52D4); k += 4;
+        stub[k++] = 0xE9; put32(stub + k, (DWORD)(kPowerReturn - ((uintptr_t)cave + k + 4))); k += 4;
+
+        put32(patch + 1, (DWORD)((uintptr_t)cave - (kPowerHook + sizeof(patch))));
+        if (!WriteProcessMemory(p, cave, stub, k, &n) || n != k ||
+            !WriteProcessMemory(p, (void *)kPowerHook, patch, sizeof(patch), &n) || n != sizeof(patch) ||
+            !FlushInstructionCache(p, (void *)kPowerHook, sizeof(patch))) {
+            VirtualFreeEx(p, cave, 0, MEM_RELEASE);
+            return 9;
+        }
+        return 0;
+    }
+    return power_is_on(p) ? 0 : 7;
+}
+
+static int power_restore(HANDLE p) {
+    BYTE current[5]; SIZE_T n = 0;
+    if (!read_bytes(p, kPowerHook, current, sizeof(current))) return 6;
+    if (!memcmp(current, kPowerOriginal, sizeof(current))) return 0;
+    if (current[0] != 0xE9) return 7;
+    if (!WriteProcessMemory(p, (void *)kPowerHook, kPowerOriginal, sizeof(kPowerOriginal), &n) ||
+        n != sizeof(kPowerOriginal) || !FlushInstructionCache(p, (void *)kPowerHook, sizeof(kPowerOriginal))) return 9;
+    return 0;
+}
 
 static DWORD find_pid(void) {
     HANDLE s=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0); PROCESSENTRY32W e={sizeof(e)}; DWORD id=0;
@@ -44,6 +98,28 @@ int wmain(int argc,wchar_t **argv) {
     DWORD pid=find_pid(); wchar_t sha[65]; if(!pid||!hash_file(sha)){wprintf(L"TARGET_UNAVAILABLE\n");return 3;} if(_wcsicmp(sha,RA2_PRODUCT_SHA256)){wprintf(L"VERSION_MISMATCH\nWRITES=REFUSED\n");return 4;}
     HANDLE p=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ|((target>=0)?(PROCESS_VM_OPERATION|PROCESS_VM_WRITE):0),FALSE,pid); if(!p)return 5;
     Ra2ModuleRegistry registry; ra2_registry_init(&registry);
-    for(int i=0;i<2;i++){BYTE b[2];if(!read2(p,kPatches[i].address,b)){CloseHandle(p);return 6;}wprintf(L"%ls=%ls bytes=%02X%02X\n",ra2_module_name(kPatches[i].id),state(b,&kPatches[i]),b[0],b[1]);if(target==i){const Patch *x=&kPatches[i];const BYTE *want=enable?x->original:x->patched;const BYTE *next=enable?x->patched:x->original;if(memcmp(b,want,2)){wprintf(L"REFUSED: unexpected current bytes\n");CloseHandle(p);return 7;}if(enable){if(ra2_begin_apply(&registry,x->id)!=RA2_RESULT_OK||ra2_commit_apply(&registry,x->id,x->original,2)!=RA2_RESULT_OK){CloseHandle(p);return 8;}}else{if(ra2_begin_apply(&registry,x->id)!=RA2_RESULT_OK||ra2_commit_apply(&registry,x->id,x->original,2)!=RA2_RESULT_OK||ra2_begin_restore(&registry,x->id)!=RA2_RESULT_OK){CloseHandle(p);return 8;}}SIZE_T n=0;if(!WriteProcessMemory(p,(void*)x->address,next,2,&n)||n!=2||!FlushInstructionCache(p,(void*)x->address,2)){CloseHandle(p);return 9;}if(!enable&&ra2_commit_restore(&registry,x->id,x->original,2)!=RA2_RESULT_OK){CloseHandle(p);return 10;}wprintf(L"%ls=%ls\n",ra2_module_name(x->id),enable?L"ON":L"OFF");}}
+    BYTE money[2]; BYTE power[5];
+    if (!read2(p, kMoneyPatch.address, money) || !read_bytes(p, kPowerHook, power, sizeof(power))) { CloseHandle(p); return 6; }
+    wprintf(L"money=%ls bytes=%02X%02X\n", state(money, &kMoneyPatch), money[0], money[1]);
+    wprintf(L"power=%ls bytes=%02X%02X\n", !memcmp(power, kPowerOriginal, sizeof(power)) ? L"OFF" : power[0] == 0xE9 ? L"ON" : L"UNKNOWN", power[0], power[1]);
+
+    if (target == 0) {
+        const BYTE *want = enable ? kMoneyPatch.original : kMoneyPatch.patched;
+        const BYTE *next = enable ? kMoneyPatch.patched : kMoneyPatch.original;
+        if (memcmp(money, want, 2)) { wprintf(L"REFUSED: unexpected money bytes\n"); CloseHandle(p); return 7; }
+        if (enable) {
+            if (ra2_begin_apply(&registry, kMoneyPatch.id) != RA2_RESULT_OK || ra2_commit_apply(&registry, kMoneyPatch.id, kMoneyPatch.original, 2) != RA2_RESULT_OK) { CloseHandle(p); return 8; }
+        } else {
+            if (ra2_begin_apply(&registry, kMoneyPatch.id) != RA2_RESULT_OK || ra2_commit_apply(&registry, kMoneyPatch.id, kMoneyPatch.original, 2) != RA2_RESULT_OK || ra2_begin_restore(&registry, kMoneyPatch.id) != RA2_RESULT_OK) { CloseHandle(p); return 8; }
+        }
+        SIZE_T n = 0;
+        if (!WriteProcessMemory(p, (void *)kMoneyPatch.address, next, 2, &n) || n != 2 || !FlushInstructionCache(p, (void *)kMoneyPatch.address, 2)) { CloseHandle(p); return 9; }
+        if (!enable && ra2_commit_restore(&registry, kMoneyPatch.id, kMoneyPatch.original, 2) != RA2_RESULT_OK) { CloseHandle(p); return 10; }
+        wprintf(L"money=%ls\n", enable ? L"ON" : L"OFF");
+    } else if (target == 1) {
+        int rc = enable ? power_apply(p) : power_restore(p);
+        if (rc) { wprintf(L"REFUSED: power guarded patch failed code=%d\n", rc); CloseHandle(p); return rc; }
+        wprintf(L"power=%ls\n", enable ? L"ON_PLAYER_ONLY" : L"OFF");
+    }
     wprintf(L"VERSION=MATCHED PID=%lu WRITES=%ls\n",pid,target>=0?L"ONE":L"NONE"); CloseHandle(p); return 0;
 }
