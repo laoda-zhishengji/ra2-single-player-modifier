@@ -61,6 +61,13 @@ static const wchar_t *patch_state(BYTE a, BYTE b, BYTE oa, BYTE ob, BYTE pa, BYT
     return L"UNKNOWN";
 }
 
+static const wchar_t *power_state(const BYTE b[5]) {
+    static const BYTE original[5] = {0x03,0xC8,0x89,0x8E,0xD4};
+    if (!memcmp(b, original, sizeof(original))) return L"UNAPPLIED";
+    if (b[0] == 0xE9) return L"APPLIED_PLAYER_ONLY";
+    return L"UNKNOWN";
+}
+
 static BOOL process_present(const wchar_t *name, DWORD *pid_out) {
     HANDLE s = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     PROCESSENTRY32W e = { sizeof(e) };
@@ -104,10 +111,10 @@ int wmain(void) {
     HANDLE p = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, pid);
     if (!p) { wprintf(L"memory=READ_HANDLE_FAILED\n"); return 5; }
 
-    BYTE b[2];
+    BYTE b[2]; BYTE power[5];
     if (read_mem(p, RA2_PRODUCT_MONEY_PATCH, b, sizeof(b))) wprintf(L"money=%ls bytes=%02X%02X\n", patch_state(b[0],b[1],0x2B,0xC7,0x90,0x90), b[0], b[1]);
     else wprintf(L"money=READ_FAILED\n");
-    if (read_mem(p, RA2_PRODUCT_POWER_PATCH, b, sizeof(b))) wprintf(L"power=%ls bytes=%02X%02X\n", patch_state(b[0],b[1],0x03,0xC8,0x90,0x90), b[0], b[1]);
+    if (read_mem(p, RA2_PRODUCT_POWER_PATCH, power, sizeof(power))) wprintf(L"power=%ls bytes=%02X%02X\n", power_state(power), power[0], power[1]);
     else wprintf(L"power=READ_FAILED\n");
 
     DWORD root = 0, value = 0; const DWORD offs[] = {0x52B8,0x52BC,0x52C0,0x52C4,0x52C8};
