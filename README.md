@@ -36,6 +36,8 @@
 
 See [BUILD.md](BUILD.md) for the Windows build procedure. Generate the runnable package with [release/package.ps1](release/package.ps1), then launch `dist/RA2SinglePlayerModifier/ra2_product_ui.exe` after entering a single-player mission.
 
+For convenient distribution, the release page also provides a single-file launcher, `RA2SinglePlayerModifier.exe`. It embeds the product components, expands them into a temporary runtime directory, and starts the same UI without requiring users to manage the component files manually.
+
 The project intentionally excludes chat exports, diagnostic logs, screenshots, local memory snapshots, compiler caches, game saves, and user-specific data.
 
 ## Status
