@@ -1,0 +1,7 @@
+Product: RA2 Single-Player Modifier
+Release: 0.1.1-ui-preview
+Target: Steam Red Alert II original single-player game.exe
+Target SHA-256: 73288C03B58D370BE268CA6D156B4E33BFDB2066DC980359467D8852FF3B00DF
+Scope: single-player only; no LAN, online, mods, Yuri's Revenge, or other versions
+UI: consumer desktop layout with connection monitoring, PID display, grouped toggles, safe-state feedback, exportable session logs, and Red Alert 2 visual assets
+Status: preview build; gameplay feature acceptance still required

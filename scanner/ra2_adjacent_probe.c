@@ -1,0 +1,11 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <tlhelp32.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+
+static const wchar_t kPath[] = L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Command & Conquer Red Alert II\\game.exe";
+static DWORD find_target(void){HANDLE s=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);PROCESSENTRY32W e={sizeof(e)};DWORD r=0;if(s!=INVALID_HANDLE_VALUE&&Process32FirstW(s,&e))do{if(!_wcsicmp(e.szExeFile,L"game.exe")){HANDLE h=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,e.th32ProcessID);wchar_t q[MAX_PATH];DWORD n=MAX_PATH;if(h&&QueryFullProcessImageNameW(h,0,q,&n)&&!_wcsicmp(q,kPath))r=e.th32ProcessID;if(h)CloseHandle(h);}}while(!r&&Process32NextW(s,&e));if(s!=INVALID_HANDLE_VALUE)CloseHandle(s);return r;}
+static int readable(DWORD p){p&=0xff;return p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY;}
+int wmain(void){const char *names[]={"GAPILL","NALASR","GAGUN","NACNST","GACNST"};DWORD id=find_target();if(!id){wprintf(L"未找到 game.exe\n");return 2;}HANDLE h=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,id);if(!h)return 3;MEMORY_BASIC_INFORMATION m;uintptr_t cur=0;BYTE buf[65536];int hits=0;while(VirtualQueryEx(h,(void*)cur,&m,sizeof(m))==sizeof(m)){if(m.State==MEM_COMMIT&&readable(m.Protect)&&!(m.Protect&PAGE_GUARD)){SIZE_T off=0;while(off<m.RegionSize){SIZE_T want=m.RegionSize-off;if(want>sizeof(buf))want=sizeof(buf);SIZE_T got=0;if(ReadProcessMemory(h,(BYTE*)m.BaseAddress+off,buf,want,&got)&&got){for(SIZE_T i=0;i<got;i++){for(int z=0;z<5;z++){size_t n=strlen(names[z]);if(i+n>=got||memcmp(buf+i,names[z],n))continue;uintptr_t obj=(uintptr_t)m.BaseAddress+off+i-0x24;DWORD vt=0,adj=0,idx=0;SIZE_T x=0;ReadProcessMemory(h,(void*)obj,&vt,4,&x);ReadProcessMemory(h,(void*)(obj+0xC40),&adj,4,&x);ReadProcessMemory(h,(void*)(obj+0x20),&idx,4,&x);if(adj<100&&vt>=0x400000&&vt<0x800000){wprintf(L"TYPE %-6S obj=%p vtable=%08X Adjacent=%lu field20=%08X\n",names[z],(void*)obj,vt,(unsigned long)adj,idx);if(++hits>40){CloseHandle(h);return 0;}}}}}off+=want;}}cur=(uintptr_t)m.BaseAddress+m.RegionSize;if(!cur)break;}wprintf(L"READ_ONLY hits=%d\n",hits);CloseHandle(h);return 0;}

@@ -1,0 +1,215 @@
+cmake_minimum_required(VERSION 3.20)
+project(RA2SinglePlayerProbe C)
+
+if(NOT WIN32)
+    message(FATAL_ERROR "This project is intended for Windows only.")
+endif()
+
+add_library(ra2_probe SHARED probe/ra2_probe.c)
+target_compile_definitions(ra2_probe PRIVATE UNICODE _UNICODE)
+set_target_properties(ra2_probe PROPERTIES OUTPUT_NAME "ra2_probe")
+
+add_executable(ra2_probe_loader loader/ra2_probe_loader.c)
+target_compile_definitions(ra2_probe_loader PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_money_scan scanner/ra2_money_scan.c)
+target_compile_definitions(ra2_money_scan PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_money_rescan scanner/ra2_money_rescan.c)
+target_compile_definitions(ra2_money_rescan PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_pointer_probe scanner/ra2_pointer_probe.c)
+target_compile_definitions(ra2_pointer_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_probe scanner/ra2_build_probe.c)
+target_compile_definitions(ra2_build_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_watch scanner/ra2_build_watch.c)
+target_compile_definitions(ra2_build_watch PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_candidate_probe scanner/ra2_build_candidate_probe.c)
+target_compile_definitions(ra2_build_candidate_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_candidate_probe scanner/ra2_instant_candidate_probe.c)
+target_compile_definitions(ra2_instant_candidate_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_probe scanner/ra2_super_probe.c)
+target_compile_definitions(ra2_super_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_watch scanner/ra2_super_watch.c)
+target_compile_definitions(ra2_super_watch PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_ready_test patcher/ra2_super_ready_test.c)
+target_compile_definitions(ra2_super_ready_test PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_sync_test patcher/ra2_super_sync_test.c)
+target_compile_definitions(ra2_super_sync_test PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_reset_call patcher/ra2_super_reset_call.c)
+target_compile_definitions(ra2_super_reset_call PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_super_service patcher/ra2_super_service.c)
+target_compile_definitions(ra2_super_service PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_map_reveal patcher/ra2_map_reveal.c)
+target_compile_definitions(ra2_map_reveal PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_map_spysat_toggle patcher/ra2_map_spysat_toggle.c)
+target_compile_definitions(ra2_map_spysat_toggle PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_minimap_refresh patcher/ra2_minimap_refresh.c)
+target_compile_definitions(ra2_minimap_refresh PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_radar_on patcher/ra2_radar_on.c)
+target_compile_definitions(ra2_radar_on PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_radar_free_on patcher/ra2_radar_free_on.c)
+target_compile_definitions(ra2_radar_free_on PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_radar_free_off patcher/ra2_radar_free_off.c)
+target_compile_definitions(ra2_radar_free_off PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_map_state_probe scanner/ra2_map_state_probe.c)
+target_compile_definitions(ra2_map_state_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_adjacent_probe scanner/ra2_adjacent_probe.c)
+target_compile_definitions(ra2_adjacent_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_adjacent_inventory scanner/ra2_adjacent_inventory.c)
+target_compile_definitions(ra2_adjacent_inventory PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_building_inventory scanner/ra2_building_inventory.c)
+target_compile_definitions(ra2_building_inventory PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_auto_repair_once patcher/ra2_auto_repair_once.c)
+target_compile_definitions(ra2_auto_repair_once PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_auto_repair_service patcher/ra2_auto_repair_service.c)
+target_compile_definitions(ra2_auto_repair_service PRIVATE UNICODE _UNICODE)
+add_executable(ra2_garrison_civilian_repair_service patcher/ra2_garrison_civilian_repair_service.c)
+target_compile_definitions(ra2_garrison_civilian_repair_service PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_iq_probe scanner/ra2_iq_probe.c)
+target_compile_definitions(ra2_iq_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_anywhere_test patcher/ra2_build_anywhere_test.c)
+target_compile_definitions(ra2_build_anywhere_test PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_product_build_distance patcher/ra2_build_anywhere_test.c)
+target_compile_definitions(ra2_product_build_distance PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_radar_recompute_off patcher/ra2_radar_recompute_off.c)
+target_compile_definitions(ra2_radar_recompute_off PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_radar_recompute_on patcher/ra2_radar_recompute_on.c)
+target_compile_definitions(ra2_radar_recompute_on PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_distance_test patcher/ra2_build_distance_test.c)
+target_compile_definitions(ra2_build_distance_test PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_patch_probe patcher/ra2_patch_probe.c)
+target_compile_definitions(ra2_patch_probe PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_patch_manager patcher/ra2_patch_manager.c)
+target_compile_definitions(ra2_patch_manager PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_product_status product/ra2_product_status.c product/ra2_product_module.c)
+target_compile_definitions(ra2_product_status PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_status PRIVATE bcrypt)
+
+add_library(ra2_product_module STATIC product/ra2_product_module.c)
+add_executable(ra2_product_module_test product/ra2_product_module_test.c)
+target_link_libraries(ra2_product_module_test PRIVATE ra2_product_module)
+
+add_executable(ra2_product_control product/ra2_product_control.c product/ra2_product_module.c)
+target_compile_definitions(ra2_product_control PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_control PRIVATE bcrypt)
+
+add_executable(ra2_product_production product/ra2_product_production.c)
+target_compile_definitions(ra2_product_production PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_production PRIVATE bcrypt)
+
+add_executable(ra2_product_super product/ra2_product_super.c)
+target_compile_definitions(ra2_product_super PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_super PRIVATE bcrypt)
+
+add_executable(ra2_product_fog product/ra2_product_fog.c)
+target_compile_definitions(ra2_product_fog PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_fog PRIVATE bcrypt)
+
+add_executable(ra2_product_garrison_repair patcher/ra2_garrison_civilian_repair_service.c)
+target_compile_definitions(ra2_product_garrison_repair PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_garrison_repair PRIVATE bcrypt)
+
+add_executable(ra2_product_auto_repair patcher/ra2_auto_repair_service.c)
+target_compile_definitions(ra2_product_auto_repair PRIVATE UNICODE _UNICODE)
+target_link_libraries(ra2_product_auto_repair PRIVATE bcrypt)
+
+add_executable(ra2_product_services product/ra2_product_services.c)
+target_compile_definitions(ra2_product_services PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_product_hub product/ra2_product_hub.c)
+target_compile_definitions(ra2_product_hub PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_product_instant_service product/ra2_product_instant_service.c)
+target_compile_definitions(ra2_product_instant_service PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_product_super_service product/ra2_product_super_service.c)
+target_compile_definitions(ra2_product_super_service PRIVATE UNICODE _UNICODE)
+
+# The product UI is a WinForms C# executable. It is compiled by the
+# release script with the installed .NET Framework compiler; keeping it out
+# of this C-language CMake project avoids treating .cs as a C source.
+add_custom_target(ra2_product_ui)
+
+add_executable(ra2_power_manager patcher/ra2_power_manager.c)
+target_compile_definitions(ra2_power_manager PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_manager patcher/ra2_build_manager.c)
+target_compile_definitions(ra2_build_manager PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_once patcher/ra2_instant_once.c)
+target_compile_definitions(ra2_instant_once PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_all patcher/ra2_instant_all.c)
+target_compile_definitions(ra2_instant_all PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_all6 patcher/ra2_instant_all6.c)
+target_compile_definitions(ra2_instant_all6 PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_service patcher/ra2_instant_service.c)
+target_compile_definitions(ra2_instant_service PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_guarded_instant patcher/ra2_guarded_instant.c)
+target_compile_definitions(ra2_guarded_instant PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_instant_code_test patcher/ra2_instant_code_test.c)
+target_compile_definitions(ra2_instant_code_test PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_debit_policy_test logic/ra2_debit_policy.c)
+
+add_executable(ra2_ptrscan scanner/ra2_ptrscan.c)
+target_compile_definitions(ra2_ptrscan PRIVATE UNICODE _UNICODE)
+
+add_library(ra2_money SHARED money/ra2_money.c)
+target_compile_definitions(ra2_money PRIVATE UNICODE _UNICODE)
+set_target_properties(ra2_money PROPERTIES OUTPUT_NAME "ra2_money")
+
+add_library(ra2_money_no_decrease SHARED money/ra2_money_no_decrease.c)
+target_compile_definitions(ra2_money_no_decrease PRIVATE UNICODE _UNICODE)
+set_target_properties(ra2_money_no_decrease PROPERTIES OUTPUT_NAME "ra2_money_no_decrease")
+
+add_library(ra2_money_hook SHARED money/ra2_money_hook.c)
+target_compile_definitions(ra2_money_hook PRIVATE UNICODE _UNICODE)
+set_target_properties(ra2_money_hook PROPERTIES OUTPUT_NAME "ra2_money_hook")
+
+add_executable(ra2_write_trace tracer/ra2_write_trace.c)
+target_compile_definitions(ra2_write_trace PRIVATE UNICODE _UNICODE)
+
+add_executable(ra2_build_decision_trace tracer/ra2_build_decision_trace.c)
+target_compile_definitions(ra2_build_decision_trace PRIVATE UNICODE _UNICODE)
+
+if(MINGW)
+    target_link_options(ra2_probe PRIVATE -static-libgcc)
+    target_link_options(ra2_probe_loader PRIVATE -static-libgcc)
+endif()

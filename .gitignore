@@ -1,0 +1,25 @@
+# Local build and runtime output
+build/
+build-vs/
+dist/*
+!dist/RA2SinglePlayerModifier/
+product-state/
+_local_archive/
+
+# Generated diagnostics and binary intermediates
+*.obj
+*.pdb
+*.ilk
+*.log
+*.tmp
+
+# Historical screenshots and local handoff bundles
+*.zip
+ui-*.png
+audit-*.png
+factory-*.png
+
+# User/game-specific data
+*.sav
+*.ini
+*.yrm

@@ -1,0 +1,9 @@
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <tlhelp32.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+static const wchar_t path[]=L"C:\\Program Files (x86)\\Steam\\steamapps\\common\\Command & Conquer Red Alert II\\game.exe";
+static DWORD pid(void){HANDLE s=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);PROCESSENTRY32W e={0};DWORD r=0;e.dwSize=sizeof(e);if(s!=INVALID_HANDLE_VALUE&&Process32FirstW(s,&e))do{if(!_wcsicmp(e.szExeFile,L"game.exe")){HANDLE h=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,e.th32ProcessID);wchar_t q[MAX_PATH];DWORD n=MAX_PATH;if(h&&QueryFullProcessImageNameW(h,0,q,&n)&&!_wcsicmp(q,path))r=e.th32ProcessID;if(h)CloseHandle(h);}}while(!r&&Process32NextW(s,&e));if(s!=INVALID_HANDLE_VALUE)CloseHandle(s);return r;}
+int wmain(void){DWORD id=pid();if(!id)return 2;HANDLE p=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ,FALSE,id);if(!p)return 3;DWORD root=0,arr=0,obj[7]={0},before[7][13]={{0}},after[7][13]={{0}};SIZE_T n=0;if(!ReadProcessMemory(p,(void*)0x00A35DB4,&root,4,&n)||n!=4||!ReadProcessMemory(p,(void*)(uintptr_t)(root+0x1A0),&arr,4,&n)||n!=4){CloseHandle(p);return 4;}for(int i=0;i<7;i++){ReadProcessMemory(p,(void*)(uintptr_t)(arr+i*4),&obj[i],4,&n);if(obj[i]<0x10000) obj[i]=0;for(int j=0;j<13&&obj[i];j++)ReadProcessMemory(p,(void*)(uintptr_t)(obj[i]+0x20+j*4),&before[i][j],4,&n);}wprintf(L"captured player=0x%08lX; waiting 3 seconds...\n",(unsigned long)root);Sleep(3000);for(int i=0;i<7;i++)for(int j=0;j<13&&obj[i];j++){ReadProcessMemory(p,(void*)(uintptr_t)(obj[i]+0x20+j*4),&after[i][j],4,&n);if(before[i][j]!=after[i][j])wprintf(L"id=%d obj=0x%08lX +0x%lX: %lu -> %lu\n",i,(unsigned long)obj[i],(unsigned long)(0x20+j*4),(unsigned long)before[i][j],(unsigned long)after[i][j]);}wprintf(L"READ_ONLY=TRUE\n");CloseHandle(p);return 0;}
