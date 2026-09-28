@@ -84,9 +84,27 @@ static BOOL process_present(const wchar_t *name, DWORD *pid_out) {
     return found;
 }
 
+static BOOL named_event_signaled(const wchar_t *name) {
+    HANDLE event = OpenEventW(SYNCHRONIZE, FALSE, name);
+    if (!event) return FALSE;
+    BOOL signaled = WaitForSingleObject(event, 0) == WAIT_OBJECT_0;
+    CloseHandle(event);
+    return signaled;
+}
+
+static const wchar_t *auto_repair_state(void) {
+    if (named_event_signaled(RA2_PRODUCT_AUTO_REPAIR_READY_EVENT)) return L"ACTIVE";
+    if (named_event_signaled(RA2_PRODUCT_AUTO_REPAIR_AMBIGUOUS_EVENT)) return L"AMBIGUOUS";
+    if (named_event_signaled(RA2_PRODUCT_AUTO_REPAIR_WRITE_FAILED_EVENT)) return L"WRITE_FAILED";
+    if (named_event_signaled(RA2_PRODUCT_AUTO_REPAIR_ACCESS_FAILED_EVENT)) return L"ACCESS_FAILED";
+    return L"WAITING";
+}
+
 static void print_service_status(void) {
     DWORD pid = 0;
-    wprintf(L"auto_repair=%ls", process_present(L"ra2_product_auto_repair.exe", &pid) ? L"ON" : L"OFF");
+    BOOL auto_on = process_present(L"ra2_product_auto_repair.exe", &pid);
+    wprintf(L"auto_repair=%ls auto_repair_state=%ls", auto_on ? L"ON" : L"OFF",
+            auto_on ? auto_repair_state() : L"OFF");
     if (pid) wprintf(L" pid=%lu", pid);
     wprintf(L"\n");
     pid = 0;
