@@ -165,6 +165,13 @@ static void restore_if_unchanged(HANDLE process, uintptr_t address, int original
         WriteProcessMemory(process, (LPVOID)address, &original, sizeof(original), &written);
 }
 
+static void reset_apply_status(HANDLE ready, HANDLE ambiguous, HANDLE write_failed, HANDLE access_failed) {
+    ResetEvent(ready);
+    ResetEvent(ambiguous);
+    ResetEvent(write_failed);
+    ResetEvent(access_failed);
+}
+
 static BOOL read_task_root(HANDLE process, DWORD *root) {
     SIZE_T got = 0;
     *root = 0;
@@ -185,6 +192,19 @@ int wmain(int argc, wchar_t **argv) {
     SetConsoleCtrlHandler(handler, TRUE);
     HANDLE stop = CreateEventW(NULL, TRUE, FALSE, kStopEvent);
     if (!stop) return 3;
+    HANDLE ready = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_READY_EVENT);
+    HANDLE ambiguous = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_AMBIGUOUS_EVENT);
+    HANDLE write_failed = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_WRITE_FAILED_EVENT);
+    HANDLE access_failed = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_ACCESS_FAILED_EVENT);
+    if (!ready || !ambiguous || !write_failed || !access_failed) {
+        if (ready) CloseHandle(ready);
+        if (ambiguous) CloseHandle(ambiguous);
+        if (write_failed) CloseHandle(write_failed);
+        if (access_failed) CloseHandle(access_failed);
+        CloseHandle(stop);
+        return 3;
+    }
+    reset_apply_status(ready, ambiguous, write_failed, access_failed);
 
     DWORD pid = 0, task_root = 0, last_scan = 0;
     uintptr_t address = 0;
@@ -197,6 +217,7 @@ int wmain(int argc, wchar_t **argv) {
         DWORD current_pid = find_pid();
         if (!current_pid) {
             restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
             address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
             if (process) { CloseHandle(process); process = NULL; }
             pid = 0;
@@ -204,23 +225,30 @@ int wmain(int argc, wchar_t **argv) {
         }
         if (current_pid != pid) {
             restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
             if (process) CloseHandle(process);
             process = NULL;
             pid = current_pid; address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
         }
         if (!process) process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ |
             PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, pid);
-        if (!process) continue;
+        if (!process) {
+            SetEvent(access_failed);
+            continue;
+        }
+        ResetEvent(access_failed);
 
         DWORD current_root = 0;
         if (!read_task_root(process, &current_root) || !current_root) {
             restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
             address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
             Sleep(100);
             continue;
         }
         if (current_root != task_root) {
             restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
             address = 0; wrote = FALSE; original = 1; task_root = current_root; last_scan = 0;
             wprintf(L"AUTO_REPAIR_TASK_CHANGED root=0x%08lX\n", current_root);
         }
@@ -228,6 +256,7 @@ int wmain(int argc, wchar_t **argv) {
         int current_value = -1;
         if (address && !read_repair_sell(process, address, &current_value, TRUE)) {
             restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
             address = 0; wrote = FALSE; last_scan = 0;
         }
         if (!address) {
@@ -244,30 +273,59 @@ int wmain(int argc, wchar_t **argv) {
                 if (found) {
                     address = found;
                     original = found_value;
+                    reset_apply_status(ready, ambiguous, write_failed, access_failed);
                     wprintf(L"AUTO_REPAIR_IQ_TARGET source=scan addr=0x%08lX old=%d\n",
                             (unsigned long)address, original);
                 } else if (matches > 1) {
+                    ResetEvent(ready);
+                    SetEvent(ambiguous);
+                    ResetEvent(write_failed);
                     wprintf(L"AUTO_REPAIR_IQ_AMBIGUOUS matches>1; no write performed\n");
                 } else {
+                    ResetEvent(ready);
+                    ResetEvent(ambiguous);
+                    ResetEvent(write_failed);
                     wprintf(L"AUTO_REPAIR_IQ_NOT_FOUND; retrying\n");
                 }
             }
         }
 
-        if (address && read_repair_sell(process, address, &current_value, TRUE) && current_value != 0) {
-            int zero = 0;
-            SIZE_T written = 0;
-            if (WriteProcessMemory(process, (LPVOID)address, &zero, sizeof(zero), &written) &&
-                written == sizeof(zero)) {
-                wrote = TRUE;
-                wprintf(L"AUTO_REPAIR_IQ_APPLIED addr=0x%08lX old=%d new=0\n",
-                        (unsigned long)address, original);
+        if (address && read_repair_sell(process, address, &current_value, TRUE)) {
+            if (current_value != 0) {
+                int zero = 0;
+                SIZE_T written = 0;
+                if (WriteProcessMemory(process, (LPVOID)address, &zero, sizeof(zero), &written) &&
+                    written == sizeof(zero)) {
+                    wrote = TRUE;
+                    if (read_repair_sell(process, address, &current_value, TRUE) && current_value == 0) {
+                        SetEvent(ready);
+                        ResetEvent(ambiguous);
+                        ResetEvent(write_failed);
+                        wprintf(L"AUTO_REPAIR_IQ_APPLIED addr=0x%08lX old=%d new=0\n",
+                                (unsigned long)address, original);
+                    } else {
+                        ResetEvent(ready);
+                        SetEvent(write_failed);
+                    }
+                } else {
+                    ResetEvent(ready);
+                    SetEvent(write_failed);
+                }
+            } else {
+                SetEvent(ready);
+                ResetEvent(ambiguous);
+                ResetEvent(write_failed);
             }
         }
     }
 
     restore_if_unchanged(process, address, original, wrote);
+    reset_apply_status(ready, ambiguous, write_failed, access_failed);
     if (process) CloseHandle(process);
+    CloseHandle(ready);
+    CloseHandle(ambiguous);
+    CloseHandle(write_failed);
+    CloseHandle(access_failed);
     CloseHandle(stop);
     wprintf(L"AUTO_REPAIR_IQ_SERVICE stopped\n");
     return 0;
