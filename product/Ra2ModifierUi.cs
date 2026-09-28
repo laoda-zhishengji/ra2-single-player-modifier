@@ -120,6 +120,7 @@ sealed class Row : Panel
 {
     readonly Control _icon; readonly LB _name, _desc;
     readonly Pill _tog;
+    readonly string _defaultDesc;
     bool _hv, _av = true, _on;
     public bool IsOn { get { return _on; } set { _on = value; _tog.On = value; } }
 
@@ -129,6 +130,7 @@ sealed class Row : Panel
         BackColor = C.BgCard; Margin = new Padding(0); Padding = new Padding(0);
         _icon = new FeatureIcon(TileFor(name));
         _name = new LB { Text = name, Font = nf, ForeColor = C.Tw, AutoEllipsis = true };
+        _defaultDesc = desc;
         _desc = new LB { Text = desc, Font = df, ForeColor = C.Tg, AutoEllipsis = true };
         _tog = new Pill();
         _tog.Tog += delegate { _on = _tog.On; if (cb != null) cb(_tog.On); };
@@ -155,6 +157,7 @@ sealed class Row : Panel
     }
 
     public void SetAv(bool v) { _av = v; _tog.OK = v; }
+    public void SetStateDesc(string text) { _desc.Text = String.IsNullOrEmpty(text) ? _defaultDesc : text; }
 
     void DoLayout(object s, EventArgs e)
     {
@@ -462,6 +465,20 @@ sealed class App : Form
         _so = Process.GetProcessesByName("ra2_product_super_service").Length > 0;
         _ar = o.IndexOf("auto_repair=ON", StringComparison.OrdinalIgnoreCase) >= 0;
         _gr = o.IndexOf("garrison_repair=ON", StringComparison.OrdinalIgnoreCase) >= 0;
+        string repairState = F(o, "auto_repair_state=");
+        if (_rows[6] != null) {
+            if (repairState.Equals("ACTIVE", StringComparison.OrdinalIgnoreCase))
+                _rows[6].SetStateDesc("原版 RepairSell 规则已应用");
+            else if (repairState.Equals("AMBIGUOUS", StringComparison.OrdinalIgnoreCase))
+                _rows[6].SetStateDesc("找到多个候选规则，未写入；请查看日志");
+            else if (repairState.Equals("WRITE_FAILED", StringComparison.OrdinalIgnoreCase))
+                _rows[6].SetStateDesc("规则已定位，但写入失败");
+            else if (repairState.Equals("ACCESS_FAILED", StringComparison.OrdinalIgnoreCase))
+                _rows[6].SetStateDesc("无法访问游戏进程，请以相同权限启动修改器");
+            else if (repairState.Equals("WAITING", StringComparison.OrdinalIgnoreCase))
+                _rows[6].SetStateDesc("后台服务正在定位当前任务规则");
+            else _rows[6].SetStateDesc(null);
+        }
         Sync();
     }
 
