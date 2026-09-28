@@ -16,6 +16,24 @@ static BOOL service_pid(const wchar_t *name, DWORD *out) {
     CloseHandle(s); return found;
 }
 
+static BOOL event_signaled(const wchar_t *name) {
+    HANDLE event;
+    if (!name) return FALSE;
+    event = OpenEventW(SYNCHRONIZE, FALSE, name);
+    if (!event) return FALSE;
+    BOOL signaled = WaitForSingleObject(event, 0) == WAIT_OBJECT_0;
+    CloseHandle(event);
+    return signaled;
+}
+
+static const wchar_t *auto_repair_state(void) {
+    if (event_signaled(RA2_PRODUCT_AUTO_REPAIR_READY_EVENT)) return L"ACTIVE";
+    if (event_signaled(RA2_PRODUCT_AUTO_REPAIR_AMBIGUOUS_EVENT)) return L"AMBIGUOUS";
+    if (event_signaled(RA2_PRODUCT_AUTO_REPAIR_WRITE_FAILED_EVENT)) return L"WRITE_FAILED";
+    if (event_signaled(RA2_PRODUCT_AUTO_REPAIR_ACCESS_FAILED_EVENT)) return L"ACCESS_FAILED";
+    return L"WAITING";
+}
+
 static BOOL game_present(void) {
     HANDLE s = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0); PROCESSENTRY32W e = { sizeof(e) }; BOOL found = FALSE;
     if (s == INVALID_HANDLE_VALUE) return FALSE;
@@ -85,7 +103,18 @@ int wmain(int argc, wchar_t **argv) {
     BOOL gar_off = argc == 2 && !_wcsicmp(argv[1], L"--garrison-off");
     BOOL all_off = argc == 2 && !_wcsicmp(argv[1], L"--all-off");
     if (argc > 2 || (!status && !auto_on && !auto_off && !gar_on && !gar_off && !all_off)) { wprintf(L"Usage: ra2_product_services.exe [--status|--auto-on|--auto-off|--garrison-on|--garrison-off|--all-off]\n"); return 2; }
-    if (status) { DWORD a = 0, g = 0; wprintf(L"auto_repair=%ls garrison_repair=%ls\n", service_pid(kAuto.exe, &a) ? L"ON" : L"OFF", service_pid(kGarrison.exe, &g) ? L"ON" : L"OFF"); return 0; }
+    if (status) {
+        DWORD a = 0, g = 0;
+        BOOL auto_running = service_pid(kAuto.exe, &a);
+        BOOL garrison_on = service_pid(kGarrison.exe, &g);
+        wprintf(L"auto_repair=%ls auto_repair_state=%ls", auto_running ? L"ON" : L"OFF",
+                auto_running ? auto_repair_state() : L"OFF");
+        if (a) wprintf(L" pid=%lu", a);
+        wprintf(L"\ngarrison_repair=%ls", garrison_on ? L"ON" : L"OFF");
+        if (g) wprintf(L" pid=%lu", g);
+        wprintf(L"\n");
+        return 0;
+    }
     if (all_off) { int a = stop_service(&kAuto); int g = stop_service(&kGarrison); return a ? a : g; }
     if (auto_on) return start_service(&kAuto); if (auto_off) return stop_service(&kAuto); if (gar_on) return start_service(&kGarrison); return stop_service(&kGarrison);
 }
