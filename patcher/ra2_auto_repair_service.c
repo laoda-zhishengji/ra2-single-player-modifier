@@ -173,6 +173,7 @@ static BOOL read_task_root(HANDLE process, DWORD *root) {
 }
 
 int wmain(int argc, wchar_t **argv) {
+    (void)argv;
     if (argc != 1) {
         wprintf(L"Usage: ra2_product_auto_repair.exe\n");
         return 2;
