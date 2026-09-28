@@ -13,70 +13,320 @@
 static const wchar_t kStopEvent[] = L"Local\\RA2ProductAutoRepairStop";
 static const uintptr_t kKnownRepairSell = (uintptr_t)0x1DCC2104;
 static volatile BOOL g_stop = FALSE;
-static BOOL WINAPI handler(DWORD type) { if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) { g_stop = TRUE; return TRUE; } return FALSE; }
 
-static DWORD find_pid(void) { HANDLE s=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0); PROCESSENTRY32W e={sizeof(e)}; DWORD id=0; if(s==INVALID_HANDLE_VALUE)return 0; if(Process32FirstW(s,&e))do{if(!_wcsicmp(e.szExeFile,L"game.exe")){HANDLE p=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,e.th32ProcessID);wchar_t q[MAX_PATH];DWORD n=MAX_PATH;if(p&&QueryFullProcessImageNameW(p,0,q,&n)&&!_wcsicmp(q,RA2_PRODUCT_GAME_PATH))id=e.th32ProcessID;if(p)CloseHandle(p);}}while(!id&&Process32NextW(s,&e));CloseHandle(s);return id; }
-static BOOL readable(DWORD protect) { DWORD p=protect&0xff; return p==PAGE_READONLY||p==PAGE_READWRITE||p==PAGE_WRITECOPY||p==PAGE_EXECUTE_READ||p==PAGE_EXECUTE_READWRITE||p==PAGE_EXECUTE_WRITECOPY; }
-static BOOL hash_ok(void) { HANDLE f=CreateFileW(RA2_PRODUCT_GAME_PATH,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,NULL,OPEN_EXISTING,0,NULL);BCRYPT_ALG_HANDLE a=NULL;BCRYPT_HASH_HANDLE h=NULL;PUCHAR obj=NULL,dig=NULL;DWORD ol=0,dl=0,cb=0;BYTE b[8192];ULONG got=0;wchar_t out[65];BOOL ok=FALSE;if(f==INVALID_HANDLE_VALUE||BCryptOpenAlgorithmProvider(&a,BCRYPT_SHA256_ALGORITHM,NULL,0)<0)goto done;if(BCryptGetProperty(a,BCRYPT_OBJECT_LENGTH,(PUCHAR)&ol,4,&cb,0)<0||BCryptGetProperty(a,BCRYPT_HASH_LENGTH,(PUCHAR)&dl,4,&cb,0)<0)goto done;obj=HeapAlloc(GetProcessHeap(),0,ol);dig=HeapAlloc(GetProcessHeap(),0,dl);if(!obj||!dig||BCryptCreateHash(a,&h,obj,ol,NULL,0,0)<0)goto done;for(;;){if(!ReadFile(f,b,sizeof(b),&got,NULL))goto done;if(!got)break;if(BCryptHashData(h,b,got,0)<0)goto done;}if(BCryptFinishHash(h,dig,dl,0)<0)goto done;for(DWORD i=0;i<dl;i++)swprintf_s(out+i*2,65-i*2,L"%02X",dig[i]);out[64]=0;ok=!_wcsicmp(out,RA2_PRODUCT_SHA256);done:if(h)BCryptDestroyHash(h);if(a)BCryptCloseAlgorithmProvider(a,0);if(obj)HeapFree(GetProcessHeap(),0,obj);if(dig)HeapFree(GetProcessHeap(),0,dig);if(f!=INVALID_HANDLE_VALUE)CloseHandle(f);return ok; }
-
-static uintptr_t find_repair_sell(HANDLE p, int *old) {
-    MEMORY_BASIC_INFORMATION m; uintptr_t cur=0; BYTE buf[65536];
-    *old=-1;
-    while (VirtualQueryEx(p,(LPCVOID)cur,&m,sizeof(m))==sizeof(m)) {
-        if (m.State==MEM_COMMIT&&readable(m.Protect)&&!(m.Protect&PAGE_GUARD)) {
-            SIZE_T off=0;
-            while (off<m.RegionSize) {
-                SIZE_T want=m.RegionSize-off;if(want>sizeof(buf))want=sizeof(buf);SIZE_T got=0;
-                if(ReadProcessMemory(p,(BYTE*)m.BaseAddress+off,buf,want,&got)&&got>=44) {
-                    for(SIZE_T i=0;i+44<=got;i+=4) {
-                        int v[11];for(int j=0;j<11;j++)memcpy(&v[j],buf+i+j*4,4);
-                        if(v[0]==5&&v[1]==4&&v[2]==5&&v[3]==2&&v[4]>=0&&v[4]<=5&&v[5]==2&&v[6]==2&&v[7]==3&&v[8]==3&&v[9]==2&&v[10]==2){*old=v[4];return (uintptr_t)m.BaseAddress+off+i+16;}
-                    }
-                }
-                if(want<44)break;off+=want-43;
-            }
-        }
-        uintptr_t next=(uintptr_t)m.BaseAddress+m.RegionSize;if(next<=cur)break;cur=next;
+static BOOL WINAPI handler(DWORD type) {
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
+        g_stop = TRUE;
+        return TRUE;
     }
-    return 0;
+    return FALSE;
 }
 
-int wmain(int argc,wchar_t **argv) {
-    if(argc!=1){wprintf(L"Usage: ra2_product_auto_repair.exe\n");return 2;}
-    if(!hash_ok()){wprintf(L"VERSION_MISMATCH: service stopped.\n");return 2;}
-    SetConsoleCtrlHandler(handler,TRUE);
-    HANDLE stop=CreateEventW(NULL,TRUE,FALSE,kStopEvent);if(!stop)return 3;
-    DWORD pid=0;uintptr_t addr=0;int original=1;BOOL wrote=FALSE;HANDLE p=NULL;
-    wprintf(L"AUTO_REPAIR_IQ_SERVICE running\n");
-    while(!g_stop&&WaitForSingleObject(stop,100)==WAIT_TIMEOUT){
-        DWORD nowpid=find_pid();
-        if(!nowpid){addr=0;if(p){CloseHandle(p);p=NULL;}Sleep(100);continue;}
-        if(nowpid!=pid){if(p)CloseHandle(p);p=NULL;pid=nowpid;addr=0;wrote=FALSE;original=1;}
-        if(!p)p=OpenProcess(PROCESS_QUERY_INFORMATION|PROCESS_VM_READ|PROCESS_VM_OPERATION|PROCESS_VM_WRITE,FALSE,pid);
-        if(!p)continue;
-        if(!addr){
-            int known=-1; SIZE_T n=0;
-            if(ReadProcessMemory(p,(void*)kKnownRepairSell,&known,4,&n)&&n==4&&known>=0&&known<=5){addr=kKnownRepairSell;original=known;}
+static DWORD find_pid(void) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    PROCESSENTRY32W entry = { sizeof(entry) };
+    DWORD result = 0;
+    if (snapshot == INVALID_HANDLE_VALUE) return 0;
+    if (Process32FirstW(snapshot, &entry)) do {
+        if (!_wcsicmp(entry.szExeFile, L"game.exe")) {
+            HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, entry.th32ProcessID);
+            wchar_t path[MAX_PATH];
+            DWORD length = ARRAYSIZE(path);
+            if (process && QueryFullProcessImageNameW(process, 0, path, &length) &&
+                !_wcsicmp(path, RA2_PRODUCT_GAME_PATH)) result = entry.th32ProcessID;
+            if (process) CloseHandle(process);
         }
-        static DWORD scan_tick=0; DWORD tick=GetTickCount();
-        if(!addr || tick-scan_tick>=300){
-            scan_tick=tick;
-            int found_old=-1;uintptr_t found=find_repair_sell(p,&found_old);
-            if(found){
-                if(!wrote||found!=addr)original=found_old;
-                addr=found;
-                int zero=0;SIZE_T w=0;
-                if(WriteProcessMemory(p,(void*)addr,&zero,4,&w)&&w==4){wrote=TRUE;wprintf(L"AUTO_REPAIR_IQ_APPLIED addr=0x%08lX old=%d new=0\n",(unsigned long)addr,original);}
+    } while (!result && Process32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    return result;
+}
+
+static BOOL hash_ok(void) {
+    HANDLE file = INVALID_HANDLE_VALUE;
+    BCRYPT_ALG_HANDLE algorithm = NULL;
+    BCRYPT_HASH_HANDLE hash = NULL;
+    PUCHAR object = NULL, digest = NULL;
+    DWORD object_length = 0, digest_length = 0, returned = 0;
+    BYTE buffer[8192];
+    ULONG read = 0;
+    wchar_t output[65];
+    BOOL ok = FALSE;
+
+    file = CreateFileW(RA2_PRODUCT_GAME_PATH, GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE ||
+        BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, NULL, 0) < 0) goto done;
+    if (BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH, (PUCHAR)&object_length,
+                          sizeof(object_length), &returned, 0) < 0 ||
+        BCryptGetProperty(algorithm, BCRYPT_HASH_LENGTH, (PUCHAR)&digest_length,
+                          sizeof(digest_length), &returned, 0) < 0) goto done;
+    object = HeapAlloc(GetProcessHeap(), 0, object_length);
+    digest = HeapAlloc(GetProcessHeap(), 0, digest_length);
+    if (!object || !digest || BCryptCreateHash(algorithm, &hash, object, object_length, NULL, 0, 0) < 0) goto done;
+    for (;;) {
+        if (!ReadFile(file, buffer, sizeof(buffer), &read, NULL)) goto done;
+        if (!read) break;
+        if (BCryptHashData(hash, buffer, read, 0) < 0) goto done;
+    }
+    if (BCryptFinishHash(hash, digest, digest_length, 0) < 0) goto done;
+    for (DWORD i = 0; i < digest_length; ++i)
+        swprintf_s(output + i * 2, ARRAYSIZE(output) - i * 2, L"%02X", digest[i]);
+    output[64] = 0;
+    ok = !_wcsicmp(output, RA2_PRODUCT_SHA256);
+
+done:
+    if (hash) BCryptDestroyHash(hash);
+    if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+    if (object) HeapFree(GetProcessHeap(), 0, object);
+    if (digest) HeapFree(GetProcessHeap(), 0, digest);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    return ok;
+}
+
+static BOOL writable(DWORD protect) {
+    DWORD page = protect & 0xff;
+    return page == PAGE_READWRITE || page == PAGE_WRITECOPY ||
+           page == PAGE_EXECUTE_READWRITE || page == PAGE_EXECUTE_WRITECOPY;
+}
+
+/* RepairSell is the fifth integer in the tested 11-field IQ rules record. */
+static BOOL read_repair_sell(HANDLE process, uintptr_t address, int *value, BOOL require_writable) {
+    MEMORY_BASIC_INFORMATION info;
+    int fields[11];
+    SIZE_T got = 0;
+    uintptr_t region_base;
+    if (address < 16 ||
+        VirtualQueryEx(process, (LPCVOID)(address - 16), &info, sizeof(info)) != sizeof(info) ||
+        info.State != MEM_COMMIT || (info.Protect & PAGE_GUARD)) return FALSE;
+    region_base = (uintptr_t)info.BaseAddress;
+    if (info.RegionSize < sizeof(fields) || address < region_base || address - region_base < 16 ||
+        address - region_base > info.RegionSize - (sizeof(fields) - 16) ||
+        (require_writable && !writable(info.Protect)) ||
+        !ReadProcessMemory(process, (LPCVOID)(address - 16), fields, sizeof(fields), &got) ||
+        got != sizeof(fields)) return FALSE;
+    if (fields[0] != 5 || fields[1] != 4 || fields[2] != 5 || fields[3] != 2 ||
+        fields[4] < 0 || fields[4] > 5 || fields[5] != 2 || fields[6] != 2 ||
+        fields[7] != 3 || fields[8] != 3 || fields[9] != 2 || fields[10] != 2) return FALSE;
+    if (value) *value = fields[4];
+    return TRUE;
+}
+
+/* Return a fallback only when the live task has exactly one writable match. */
+static uintptr_t find_unique_repair_sell(HANDLE process, int *value, int *matches) {
+    MEMORY_BASIC_INFORMATION info;
+    uintptr_t cursor = 0, candidate = 0;
+    BYTE buffer[65536];
+    int candidate_value = -1, count = 0;
+    while (VirtualQueryEx(process, (LPCVOID)cursor, &info, sizeof(info)) == sizeof(info)) {
+        if (info.State == MEM_COMMIT && info.Type == MEM_PRIVATE &&
+            writable(info.Protect) && !(info.Protect & PAGE_GUARD)) {
+            SIZE_T offset = 0;
+            while (offset < info.RegionSize) {
+                SIZE_T wanted = info.RegionSize - offset;
+                SIZE_T got = 0;
+                if (wanted > sizeof(buffer)) wanted = sizeof(buffer);
+                if (ReadProcessMemory(process, (BYTE *)info.BaseAddress + offset,
+                                      buffer, wanted, &got) && got >= 44) {
+                    for (SIZE_T i = 0; i + 44 <= got; i += 4) {
+                        int fields[11];
+                        memcpy(fields, buffer + i, sizeof(fields));
+                        if (fields[0] == 5 && fields[1] == 4 && fields[2] == 5 && fields[3] == 2 &&
+                            fields[4] >= 0 && fields[4] <= 5 && fields[5] == 2 && fields[6] == 2 &&
+                            fields[7] == 3 && fields[8] == 3 && fields[9] == 2 && fields[10] == 2) {
+                            uintptr_t found = (uintptr_t)info.BaseAddress + offset + i + 16;
+                            if (found != candidate) {
+                                candidate = found;
+                                candidate_value = fields[4];
+                                if (++count > 1) goto done;
+                            }
+                        }
+                    }
+                }
+                if (wanted < 44) break;
+                offset += wanted - 43;
             }
         }
-        if(addr){
-            int current=-1; SIZE_T n=0;
-            if(ReadProcessMemory(p,(void*)addr,&current,4,&n)&&n==4&&current!=0){
-                int zero=0; SIZE_T w=0;
-                if(WriteProcessMemory(p,(void*)addr,&zero,4,&w)&&w==4) wrote=TRUE;
+        uintptr_t next = (uintptr_t)info.BaseAddress + info.RegionSize;
+        if (next <= cursor) break;
+        cursor = next;
+    }
+
+done:
+    if (matches) *matches = count;
+    if (count != 1) return 0;
+    if (value) *value = candidate_value;
+    return candidate;
+}
+
+static void restore_if_unchanged(HANDLE process, uintptr_t address, int original, BOOL wrote) {
+    int current = -1;
+    SIZE_T written = 0;
+    if (process && wrote && read_repair_sell(process, address, &current, TRUE) && current == 0)
+        WriteProcessMemory(process, (LPVOID)address, &original, sizeof(original), &written);
+}
+
+static void reset_apply_status(HANDLE ready, HANDLE ambiguous, HANDLE write_failed, HANDLE access_failed) {
+    ResetEvent(ready);
+    ResetEvent(ambiguous);
+    ResetEvent(write_failed);
+    ResetEvent(access_failed);
+}
+
+static BOOL read_task_root(HANDLE process, DWORD *root) {
+    SIZE_T got = 0;
+    *root = 0;
+    return ReadProcessMemory(process, (LPCVOID)RA2_PRODUCT_PLAYER_ROOT, root, sizeof(*root), &got) &&
+           got == sizeof(*root);
+}
+
+int wmain(int argc, wchar_t **argv) {
+    (void)argv;
+    if (argc != 1) {
+        wprintf(L"Usage: ra2_product_auto_repair.exe\n");
+        return 2;
+    }
+    if (!hash_ok()) {
+        wprintf(L"VERSION_MISMATCH: service stopped.\n");
+        return 2;
+    }
+    SetConsoleCtrlHandler(handler, TRUE);
+    HANDLE stop = CreateEventW(NULL, TRUE, FALSE, kStopEvent);
+    if (!stop) return 3;
+    HANDLE ready = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_READY_EVENT);
+    HANDLE ambiguous = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_AMBIGUOUS_EVENT);
+    HANDLE write_failed = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_WRITE_FAILED_EVENT);
+    HANDLE access_failed = CreateEventW(NULL, TRUE, FALSE, RA2_PRODUCT_AUTO_REPAIR_ACCESS_FAILED_EVENT);
+    if (!ready || !ambiguous || !write_failed || !access_failed) {
+        if (ready) CloseHandle(ready);
+        if (ambiguous) CloseHandle(ambiguous);
+        if (write_failed) CloseHandle(write_failed);
+        if (access_failed) CloseHandle(access_failed);
+        CloseHandle(stop);
+        return 3;
+    }
+    reset_apply_status(ready, ambiguous, write_failed, access_failed);
+
+    DWORD pid = 0, task_root = 0, last_scan = 0;
+    uintptr_t address = 0;
+    int original = 1;
+    BOOL wrote = FALSE;
+    HANDLE process = NULL;
+    wprintf(L"AUTO_REPAIR_IQ_SERVICE running\n");
+
+    while (!g_stop && WaitForSingleObject(stop, 100) == WAIT_TIMEOUT) {
+        DWORD current_pid = find_pid();
+        if (!current_pid) {
+            restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
+            address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
+            if (process) { CloseHandle(process); process = NULL; }
+            pid = 0;
+            continue;
+        }
+        if (current_pid != pid) {
+            restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
+            if (process) CloseHandle(process);
+            process = NULL;
+            pid = current_pid; address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
+        }
+        if (!process) process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ |
+            PROCESS_VM_OPERATION | PROCESS_VM_WRITE, FALSE, pid);
+        if (!process) {
+            SetEvent(access_failed);
+            continue;
+        }
+        ResetEvent(access_failed);
+
+        DWORD current_root = 0;
+        if (!read_task_root(process, &current_root) || !current_root) {
+            restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
+            address = 0; task_root = 0; wrote = FALSE; last_scan = 0;
+            Sleep(100);
+            continue;
+        }
+        if (current_root != task_root) {
+            restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
+            address = 0; wrote = FALSE; original = 1; task_root = current_root; last_scan = 0;
+            wprintf(L"AUTO_REPAIR_TASK_CHANGED root=0x%08lX\n", current_root);
+        }
+
+        int current_value = -1;
+        if (address && !read_repair_sell(process, address, &current_value, TRUE)) {
+            restore_if_unchanged(process, address, original, wrote);
+            reset_apply_status(ready, ambiguous, write_failed, access_failed);
+            address = 0; wrote = FALSE; last_scan = 0;
+        }
+        if (!address) {
+            int known_value = -1;
+            if (read_repair_sell(process, kKnownRepairSell, &known_value, TRUE)) {
+                address = kKnownRepairSell;
+                original = known_value;
+                wprintf(L"AUTO_REPAIR_IQ_TARGET source=known addr=0x%08lX old=%d\n",
+                        (unsigned long)address, original);
+            } else if (!last_scan || GetTickCount() - last_scan >= 1000) {
+                int matches = 0, found_value = -1;
+                uintptr_t found = find_unique_repair_sell(process, &found_value, &matches);
+                last_scan = GetTickCount();
+                if (found) {
+                    address = found;
+                    original = found_value;
+                    reset_apply_status(ready, ambiguous, write_failed, access_failed);
+                    wprintf(L"AUTO_REPAIR_IQ_TARGET source=scan addr=0x%08lX old=%d\n",
+                            (unsigned long)address, original);
+                } else if (matches > 1) {
+                    ResetEvent(ready);
+                    SetEvent(ambiguous);
+                    ResetEvent(write_failed);
+                    wprintf(L"AUTO_REPAIR_IQ_AMBIGUOUS matches>1; no write performed\n");
+                } else {
+                    ResetEvent(ready);
+                    ResetEvent(ambiguous);
+                    ResetEvent(write_failed);
+                    wprintf(L"AUTO_REPAIR_IQ_NOT_FOUND; retrying\n");
+                }
+            }
+        }
+
+        if (address && read_repair_sell(process, address, &current_value, TRUE)) {
+            if (current_value != 0) {
+                int zero = 0;
+                SIZE_T written = 0;
+                if (WriteProcessMemory(process, (LPVOID)address, &zero, sizeof(zero), &written) &&
+                    written == sizeof(zero)) {
+                    wrote = TRUE;
+                    if (read_repair_sell(process, address, &current_value, TRUE) && current_value == 0) {
+                        SetEvent(ready);
+                        ResetEvent(ambiguous);
+                        ResetEvent(write_failed);
+                        wprintf(L"AUTO_REPAIR_IQ_APPLIED addr=0x%08lX old=%d new=0\n",
+                                (unsigned long)address, original);
+                    } else {
+                        ResetEvent(ready);
+                        SetEvent(write_failed);
+                    }
+                } else {
+                    ResetEvent(ready);
+                    SetEvent(write_failed);
+                }
+            } else {
+                SetEvent(ready);
+                ResetEvent(ambiguous);
+                ResetEvent(write_failed);
             }
         }
     }
-    if(p&&wrote&&addr){int current=-1;SIZE_T n=0;if(ReadProcessMemory(p,(void*)addr,&current,4,&n)&&n==4&&current==0){SIZE_T w=0;WriteProcessMemory(p,(void*)addr,&original,4,&w);}}
-    if(p)CloseHandle(p);CloseHandle(stop);wprintf(L"AUTO_REPAIR_IQ_SERVICE stopped\n");return 0;
+
+    restore_if_unchanged(process, address, original, wrote);
+    reset_apply_status(ready, ambiguous, write_failed, access_failed);
+    if (process) CloseHandle(process);
+    CloseHandle(ready);
+    CloseHandle(ambiguous);
+    CloseHandle(write_failed);
+    CloseHandle(access_failed);
+    CloseHandle(stop);
+    wprintf(L"AUTO_REPAIR_IQ_SERVICE stopped\n");
+    return 0;
 }
